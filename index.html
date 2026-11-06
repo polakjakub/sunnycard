@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SunnyCard – kamery a počasí</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --ink:#14202e; --muted:#5f6b7a; --line:#dfe4ea;
+    --accent:#e8a100; --snow:#2a7fd4; --cold:#2a7fd4; --warm:#d4572a;
+    --shadow:0 6px 20px rgba(20,32,46,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.4 Inter,system-ui,sans-serif}
+  header{height:56px;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);position:relative;z-index:1000}
+  header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:-.01em}
+  header h1 span{color:var(--accent)}
+  header .meta{color:var(--muted);font-size:12px;margin-left:auto;text-align:right}
+  header button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;font:inherit;font-size:13px;cursor:pointer}
+  header button:hover{background:var(--bg)}
+
+  #wrap{position:relative;height:calc(100% - 56px)}
+  #map{position:absolute;inset:0}
+  #overlay{position:absolute;inset:0;pointer-events:none;z-index:500;overflow:hidden}
+  #lines{position:absolute;inset:0;width:100%;height:100%}
+  #lines line{stroke:#14202e;stroke-width:1.5;stroke-opacity:.55}
+
+  .card{position:absolute;width:184px;background:var(--panel);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;pointer-events:auto;cursor:pointer;transition:box-shadow .15s}
+  .card:hover{box-shadow:0 10px 28px rgba(20,32,46,.28);z-index:2}
+  .cam{position:relative;aspect-ratio:16/9;background:linear-gradient(160deg,#c9d6e3,#eef2f6);overflow:hidden}
+  .cam img{width:100%;height:100%;object-fit:cover;display:block}
+  .cam .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#5f6b7a;font-size:11px;gap:2px;text-align:center;padding:6px}
+  .cam .ph svg{width:46px;opacity:.6}
+  .cam .badge{position:absolute;left:6px;top:6px;background:rgba(20,32,46,.72);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:5px}
+  .cam .now{position:absolute;right:6px;bottom:6px;background:rgba(255,255,255,.92);border-radius:6px;padding:1px 6px;font-weight:700;font-size:13px}
+  .card .body{padding:7px 9px 8px}
+  .card .name{font-weight:700;font-size:13.5px;display:flex;justify-content:space-between;gap:6px}
+  .card .name small{font-weight:500;color:var(--muted);font-size:11px;white-space:nowrap}
+  .days{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;margin-top:5px;text-align:center}
+  .day{font-size:11px;line-height:1.25}
+  .day b{display:block;font-weight:600;color:var(--muted);font-size:10.5px}
+  .day .ic{font-size:16px;line-height:1.2}
+  .day .t{white-space:nowrap}
+  .day .t .mx{font-weight:600}
+  .day .t .mn{color:var(--muted)}
+  .day .sn{color:var(--snow);font-weight:600;min-height:13px}
+  .snowsum{margin-top:5px;font-size:11px;color:var(--snow);font-weight:600}
+
+  .dot{width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+  .home{background:#14202e;color:#fff;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600;white-space:nowrap;box-shadow:var(--shadow)}
+
+  /* Drawer */
+  #drawer{position:fixed;top:56px;right:0;bottom:0;width:420px;max-width:100%;background:var(--panel);box-shadow:-8px 0 24px rgba(20,32,46,.18);transform:translateX(105%);transition:transform .22s ease;z-index:1100;overflow-y:auto}
+  #drawer.open{transform:none}
+  #drawer .x{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line);z-index:2}
+  #drawer .x h2{margin:0;font-size:18px}
+  #drawer .x button{border:0;background:var(--bg);border-radius:8px;width:32px;height:32px;font-size:18px;cursor:pointer}
+  #drawer .content{padding:14px 16px 28px}
+  .bigcam{border-radius:10px;overflow:hidden}
+  .camtabs{display:flex;gap:6px;margin:8px 0 2px;flex-wrap:wrap}
+  .camtabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .camtabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}
+  .fact{background:var(--bg);border-radius:8px;padding:8px}
+  .fact b{display:block;font-size:15px}
+  .fact span{color:var(--muted);font-size:11.5px}
+  table.fc{width:100%;border-collapse:collapse;font-size:13px}
+  table.fc td,table.fc th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:center}
+  table.fc th{color:var(--muted);font-weight:500;font-size:11.5px}
+  table.fc td:first-child,table.fc th:first-child{text-align:left}
+  .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .links a{border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--ink);text-decoration:none;font-size:13px}
+  .links a:hover{background:var(--bg)}
+  .note{color:var(--muted);font-size:11.5px;margin-top:14px}
+
+  /* Mobile list */
+  #list{display:none}
+  @media (max-width: 820px){
+    header{height:52px}
+    header .meta{display:none}
+    #wrap{height:auto}
+    #map{position:relative;height:240px}
+    #overlay{display:none}
+    #list{display:flex;flex-direction:column;gap:12px;padding:12px}
+    #list .card{position:relative;width:100%;left:auto!important;top:auto!important}
+    #list .card .name{font-size:16px}
+    #list .card .name small{font-size:12.5px}
+    #list .days{grid-template-columns:repeat(5,1fr)}
+    #list .day{font-size:12.5px}
+    #list .day .ic{font-size:20px}
+    #drawer{top:0;width:100%}
+  }
+  .err{position:absolute;left:50%;top:12px;transform:translateX(-50%);background:#fff3cd;border:1px solid #f0d68a;padding:6px 12px;border-radius:8px;z-index:900;font-size:13px;display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Sunny<span>Card</span> · kamery &amp; počasí</h1>
+  <button id="refresh" title="Načíst znovu kamery i předpověď">↻ Obnovit</button>
+  <div class="meta" id="meta">Načítám předpověď…</div>
+</header>
+<div id="wrap">
+  <div id="map"></div>
+  <div id="overlay"><svg id="lines"></svg></div>
+  <div class="err" id="err"></div>
+  <div id="list"></div>
+</div>
+<aside id="drawer"><div class="x"><h2 id="dTitle"></h2><button id="dClose" aria-label="Zavřít">×</button></div><div class="content" id="dBody"></div></aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ===================== DATA ===================== */
+const HOME = {name:'České Budějovice', lat:48.9745, lon:14.4743};
+
+// Webcam helpers – stable "latest image" URLs
+const TD  = id => ({src:`https://webcams.tourdata.at/current/${id}/detail.jpg`, credit:'feratel / tourdata.at'});
+const FW  = slug => ({src:`https://www.foto-webcam.eu/webcam/${slug}/current/640.jpg`, credit:'www.foto-webcam.eu', link:`https://www.foto-webcam.eu/webcam/${slug}/`});
+const FER = id => ({src:`https://wtvthmb.feratel.com/thumbnails/${id}.jpeg?t=38&dcsdesign=WTP_bergfex.at`, credit:'feratel'});
+
+const RESORTS = [
+  {id:'hochficht', name:'Hochficht', region:'Böhmerwald · Horní Rakousy', cc:'AT',
+   lat:48.739, lon:13.918, fcElev:1150, alt:'930–1338 m', piste:'20 km',
+   drive:{km:75, t:'1 h 15 min'},
+   cams:[{...TD(430021942),label:'Skiarena'},{...TD(430021943),label:'Horní stanice'},{...TD(430009683),label:'Holzschlag'}],
+   links:{web:'https://skisport.com/hochficht/en', bergfex:'https://www.bergfex.at/hochficht/webcams/', yr:'Klaffer am Hochficht'}},
+  {id:'hinterstoder', name:'Hinterstoder', region:'Pyhrn-Priel · Horní Rakousy', cc:'AT',
+   lat:47.684, lon:14.122, fcElev:1500, alt:'600–2000 m', piste:'40 km',
+   drive:{km:170, t:'2 h'},
+   cams:[{...TD(430009739),label:'Höss-Express'},{...TD(430009740),label:'Huttererböden'},{...TD(430014185),label:'Hirschkogel'},{...FER(5013),label:'Höss (feratel)'}],
+   links:{web:'https://skisport.com/hinterstoder/en', bergfex:'https://www.bergfex.at/hinterstoder/webcams/', yr:'Hinterstoder'}},
+  {id:'wurzeralm', name:'Wurzeralm', region:'Spital am Pyhrn · Horní Rakousy', cc:'AT',
+   lat:47.648, lon:14.284, fcElev:1400, alt:'810–1870 m', piste:'22 km',
+   drive:{km:180, t:'2 h 05 min'},
+   cams:[{...TD(430017200),label:'Wurzeralm'},{...TD(430014190),label:'Horní stanice'},{...TD(430009738),label:'Gammering'}],
+   links:{web:'https://skisport.com/wurzeralm/en', bergfex:'https://www.bergfex.at/wurzeralm/webcams/', yr:'Spital am Pyhrn'}},
+  {id:'oetscher', name:'Ötscher', region:'Lackenhof · Dolní Rakousy', cc:'AT',
+   lat:47.873, lon:15.150, fcElev:1100, alt:'810–1500 m', piste:'18 km',
+   drive:{km:205, t:'2 h 45 min'},
+   cams:[{...FER(5009),label:'Eibenkogl'}],
+   links:{web:'https://www.oetscher.at/en', bergfex:'https://www.bergfex.at/lackenhof-oetscher/webcams/', yr:'Lackenhof'}},
+  {id:'hochkar', name:'Hochkar', region:'Göstling · Dolní Rakousy', cc:'AT',
+   lat:47.716, lon:14.918, fcElev:1550, alt:'1380–1808 m', piste:'20 km',
+   drive:{km:215, t:'2 h 50 min'},
+   cams:[{...FW('hochkar'),label:'Hochkar'}],
+   links:{web:'https://www.hochkar.com/en/webcam-hochkar', bergfex:'https://www.bergfex.at/hochkar/webcams/', yr:'Hochkar'}},
+  {id:'koessen', name:'Hochkössen', region:'Kaiserwinkl · Tyrolsko', cc:'AT',
+   lat:47.652, lon:12.418, fcElev:1200, alt:'600–1700 m', piste:'25 km',
+   drive:{km:300, t:'3 h 30 min'},
+   cams:[{...FW('unterberghorn'),label:'Unterberghorn'},{...FW('koessen'),label:'Kössen'}],
+   links:{web:'https://skisport.com/hochkoessen/en', bergfex:'https://www.bergfex.at/koessen/webcams/', yr:'Kössen'}},
+  {id:'heiligenblut', name:'Grossglockner / Heiligenblut', short:'Heiligenblut', region:'Korutany', cc:'AT',
+   lat:47.033, lon:12.865, fcElev:2000, alt:'1300–2900 m', piste:'55 km',
+   drive:{km:330, t:'4 h 15 min'},
+   cams:[{...FW('heiligenblut'),label:'Heiligenblut'},{...FW('schareck'),label:'Schareck'},{...FW('freiwandeck'),label:'Großglockner'}],
+   links:{web:'https://skisport.com/grossglockner/en', bergfex:'https://www.bergfex.at/skiheiligenblut/webcams/', yr:'Heiligenblut'}},
+  {id:'schnals', name:'Schnalstal', region:'Alpin Arena Schnals · Jižní Tyrolsko', cc:'IT',
+   lat:46.770, lon:10.790, fcElev:2700, alt:'2011–3212 m', piste:'35 km',
+   drive:{km:520, t:'6 h'},
+   cams:[{...FW('schnalstal'),label:'Schnalstal'},{...FW('kurzras'),label:'Kurzras'}],
+   links:{web:'https://www.schnalstal.com/en/winter', bergfex:'https://www.bergfex.com/schnalstal/webcams/', yr:'Kurzras'}},
+].sort((a,b)=>a.drive.km-b.drive.km);
+
+/* ===================== WEATHER ===================== */
+const WMO = c => {
+  if(c===0) return ['☀️','Jasno'];
+  if(c===1) return ['🌤️','Skoro jasno'];
+  if(c===2) return ['⛅','Polojasno'];
+  if(c===3) return ['☁️','Zataženo'];
+  if(c===45||c===48) return ['🌫️','Mlha'];
+  if(c>=51&&c<=57) return ['🌦️','Mrholení'];
+  if(c===66||c===67) return ['🌧️','Mrznoucí déšť'];
+  if(c>=61&&c<=65) return ['🌧️','Déšť'];
+  if(c>=71&&c<=77) return ['🌨️','Sněžení'];
+  if(c>=80&&c<=82) return ['🌦️','Přeháňky'];
+  if(c===85||c===86) return ['🌨️','Sněhové přeháňky'];
+  if(c>=95) return ['⛈️','Bouřka'];
+  return ['·',''];
+};
+const DN = ['Ne','Po','Út','St','Čt','Pá','So'];
+const r0 = v => v==null?'–':Math.round(v);
+const snowTxt = cm => cm>=0.5 ? `❄ ${cm<10?cm.toFixed(1).replace('.0',''):Math.round(cm)}` : '';
+let WX = {};
+
+async function loadWeather(){
+  const q = new URLSearchParams({
+    latitude: RESORTS.map(r=>r.lat).join(','),
+    longitude: RESORTS.map(r=>r.lon).join(','),
+    elevation: RESORTS.map(r=>r.fcElev).join(','),
+    current: 'temperature_2m,weather_code,wind_speed_10m',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,snowfall_sum,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,sunshine_duration',
+    hourly: 'freezing_level_height',
+    forecast_days: '7', timezone: 'Europe/Vienna'
+  });
+  try{
+    const res = await fetch('https://api.open-meteo.com/v1/forecast?'+q);
+    if(!res.ok) throw new Error(res.status);
+    let data = await res.json(); if(!Array.isArray(data)) data=[data];
+    RESORTS.forEach((r,i)=>WX[r.id]=data[i]);
+    const t = new Date();
+    document.getElementById('meta').innerHTML = `Předpověď Open-Meteo (ECMWF/ICON) · ${t.toLocaleString('cs-CZ',{hour:'2-digit',minute:'2-digit',day:'numeric',month:'numeric'})}<br>Vzdálenost = autem z Č. Budějovic`;
+    document.getElementById('err').style.display='none';
+  }catch(e){
+    const el=document.getElementById('err'); el.textContent='Předpověď se nepodařilo načíst – zkuste ↻ Obnovit.'; el.style.display='block';
+  }
+  renderAll();
+}
+
+/* ===================== WEBCAM IMG w/ FALLBACK ===================== */
+const PH = `<svg viewBox="0 0 64 40"><path d="M2 38 L20 12 L30 24 L40 8 L62 38 Z" fill="#8a9bb0"/><path d="M36 14 L40 8 L44 14 L41 13 L39 15 Z" fill="#fff"/></svg>`;
+let bust = Date.now();
+function camHTML(r, startIdx=0){
+  return `<img alt="Webcam ${r.name}" data-r="${r.id}" data-i="${startIdx}" src="${withBust(r.cams[startIdx])}" onerror="camFail(this)" loading="lazy">`;
+}
+function withBust(c){ if(!c) return ''; return c.src + (c.src.includes('?')?'&':'?') + '_=' + Math.floor(bust/60000); }
+function camFail(img){
+  const r = RESORTS.find(x=>x.id===img.dataset.r); let i = +img.dataset.i + 1;
+  if(img.dataset.fixed!=='1' && i < r.cams.length){ img.dataset.i=i; img.src = withBust(r.cams[i]); return; }
+  const box = img.parentElement;
+  img.remove();
+  if(!box.querySelector('.ph')) box.insertAdjacentHTML('afterbegin', `<div class="ph">${PH}<span>Kamera teď nejde načíst<br>– klikni pro odkazy</span></div>`);
+}
+window.camFail = camFail;
+
+/* ===================== RENDER CARD ===================== */
+function cardHTML(r, nDays){
+  const w = WX[r.id];
+  let now='', days='', snowsum='';
+  if(w && w.daily){
+    const d = w.daily;
+    now = `<div class="now">${WMO(w.current.weather_code)[0]} ${r0(w.current.temperature_2m)}°</div>`;
+    for(let i=0;i<nDays;i++){
+      const dt = new Date(d.time[i]+'T12:00');
+      days += `<div class="day"><b>${i===0?'Dnes':DN[dt.getDay()]}</b><div class="ic" title="${WMO(d.weather_code[i])[1]}">${WMO(d.weather_code[i])[0]}</div>
+        <div class="t"><span class="mx">${r0(d.temperature_2m_max[i])}°</span> <span class="mn">${r0(d.temperature_2m_min[i])}°</span></div>
+        <div class="sn">${snowTxt(d.snowfall_sum[i])}</div></div>`;
+    }
+    const tot = d.snowfall_sum.reduce((a,b)=>a+(b||0),0);
+    snowsum = `<div class="snowsum">${tot>=1?`❄ ${Math.round(tot)} cm nového sněhu za 7 dní`:'<span style="color:var(--muted);font-weight:500">Bez nového sněhu v příštích 7 dnech</span>'}</div>`;
+  }
+  return `<div class="cam">${camHTML(r)}<div class="badge">${r.cc==='IT'?'🇮🇹':'🇦🇹'} ${r.drive.km} km</div>${now}</div>
+    <div class="body"><div class="name">${r.short||r.name}<small>${r.drive.t}</small></div>
+    <div class="days">${days}</div>${snowsum}</div>`;
+}
+
+/* ===================== MAP ===================== */
+const map = L.map('map',{zoomSnap:.25, zoomControl:true, attributionControl:true});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{
+  maxZoom:18, subdomains:'abcd',
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a> · počasí <a href="https://open-meteo.com/">Open-Meteo</a>'
+}).addTo(map);
+RESORTS.forEach(r=>{
+  L.marker([r.lat,r.lon],{icon:L.divIcon({className:'',html:'<div class="dot"></div>',iconSize:[12,12],iconAnchor:[6,6]})})
+   .addTo(map).on('click',()=>openDrawer(r)).bindTooltip(r.name,{direction:'top',offset:[0,-6]});
+});
+L.marker([HOME.lat,HOME.lon],{icon:L.divIcon({className:'',html:'<div class="home">🏠 Č. Budějovice</div>',iconSize:null,iconAnchor:[50,10]})}).addTo(map);
+const isMobile = () => matchMedia('(max-width: 820px)').matches;
+function fit(){
+  const b = L.latLngBounds([[HOME.lat,HOME.lon],...RESORTS.map(r=>[r.lat,r.lon])]);
+  map.fitBounds(b, isMobile()?{padding:[20,20]}:{paddingTopLeft:[110,230], paddingBottomRight:[110,40]});
+}
+fit();
+
+/* --- Desktop: cards on the map with collision-avoiding layout and leader lines --- */
+const overlay = document.getElementById('overlay'), lines = document.getElementById('lines');
+const cardEls = {};
+function renderAll(){
+  // map cards
+  RESORTS.forEach(r=>{
+    let el = cardEls[r.id];
+    if(!el){ el = document.createElement('div'); el.className='card'; el.onclick=()=>openDrawer(r); overlay.appendChild(el); cardEls[r.id]=el; }
+    el.innerHTML = cardHTML(r,4);
+  });
+  // mobile list
+  const list = document.getElementById('list'); list.innerHTML='';
+  RESORTS.forEach(r=>{ const el=document.createElement('div'); el.className='card'; el.innerHTML=cardHTML(r,5); el.onclick=()=>openDrawer(r); list.appendChild(el); });
+  layout();
+  // re-layout once images are in (heights may change)
+  setTimeout(layout,300); setTimeout(layout,1500);
+}
+function layout(){
+  if(isMobile()) return;
+  const W = overlay.clientWidth, H = overlay.clientHeight, M = 10;
+  const items = RESORTS.map(r=>{
+    const el = cardEls[r.id]; if(!el) return null;
+    const p = map.latLngToContainerPoint([r.lat,r.lon]);
+    const w = el.offsetWidth, h = el.offsetHeight;
+    return {r, el, p, w, h, x:p.x - w/2, y:p.y - h - 22};
+  }).filter(Boolean);
+  for(let it=0; it<300; it++){
+    let moved=false;
+    for(let i=0;i<items.length;i++){
+      const a=items[i];
+      // spring back toward preferred spot
+      a.x += ((a.p.x - a.w/2) - a.x)*0.02; a.y += ((a.p.y - a.h - 22) - a.y)*0.02;
+      for(let j=i+1;j<items.length;j++){
+        const b=items[j];
+        const ox = Math.min(a.x+a.w, b.x+b.w) - Math.max(a.x,b.x) + M;
+        const oy = Math.min(a.y+a.h, b.y+b.h) - Math.max(a.y,b.y) + M;
+        if(ox>0 && oy>0){
+          moved=true;
+          if(ox<oy){ const s=(a.x<b.x?-1:1)*ox/2; a.x+=s; b.x-=s; }
+          else     { const s=(a.y<b.y?-1:1)*oy/2; a.y+=s; b.y-=s; }
+        }
+      }
+      // avoid covering the home label & any resort dot (except own)
+      const hp = map.latLngToContainerPoint([HOME.lat,HOME.lon]);
+      [...items.filter(o=>o!==a).map(o=>o.p), hp, {x:hp.x-45,y:hp.y}, {x:hp.x+45,y:hp.y}].forEach(q=>{
+        if(q.x>a.x-6 && q.x<a.x+a.w+6 && q.y>a.y-6 && q.y<a.y+a.h+6){ const up=(q.y-a.y) , down=(a.y+a.h-q.y); if(up<down) a.y += up+8; else a.y -= down+8; }});
+      a.x = Math.max(6, Math.min(W-a.w-6, a.x));
+      a.y = Math.max(6, Math.min(H-a.h-6, a.y));
+    }
+    if(!moved && it>40) break;
+  }
+  let svg='';
+  items.forEach(a=>{
+    a.el.style.left = a.x+'px'; a.el.style.top = a.y+'px';
+    // leader line from dot to nearest point of card rectangle
+    const cx = Math.max(a.x, Math.min(a.p.x, a.x+a.w)), cy = Math.max(a.y, Math.min(a.p.y, a.y+a.h));
+    if(Math.hypot(cx-a.p.x, cy-a.p.y) > 4) svg += `<line x1="${a.p.x}" y1="${a.p.y}" x2="${cx}" y2="${cy}"/>`;
+  });
+  lines.innerHTML = svg;
+}
+map.on('move zoom resize', layout);
+addEventListener('resize', ()=>{ layout(); });
+
+/* ===================== DRAWER ===================== */
+const drawer = document.getElementById('drawer');
+document.getElementById('dClose').onclick = ()=>drawer.classList.remove('open');
+addEventListener('keydown', e=>{ if(e.key==='Escape') drawer.classList.remove('open'); });
+function openDrawer(r){
+  document.getElementById('dTitle').textContent = r.name;
+  const w = WX[r.id];
+  let fc = '<p class="note">Předpověď není k dispozici.</p>', facts='';
+  if(w && w.daily){
+    const d=w.daily;
+    // freezing level today (max over today's hours)
+    const fl = w.hourly ? Math.max(...w.hourly.freezing_level_height.slice(0,24).filter(v=>v!=null)) : null;
+    facts = `<div class="facts">
+      <div class="fact"><b>${WMO(w.current.weather_code)[0]} ${r0(w.current.temperature_2m)} °C</b><span>teď ve ${r.fcElev} m</span></div>
+      <div class="fact"><b>${r0(w.current.wind_speed_10m)} km/h</b><span>vítr teď</span></div>
+      <div class="fact"><b>${fl!=null&&isFinite(fl)?Math.round(fl/50)*50+' m':'–'}</b><span>nulová izoterma dnes</span></div>
+    </div>`;
+    fc = `<table class="fc"><tr><th>Den</th><th></th><th>max / min</th><th>Sníh</th><th>Srážky</th><th>Vítr</th><th>Slunce</th></tr>` +
+      d.time.map((t,i)=>{ const dt=new Date(t+'T12:00');
+        return `<tr><td>${i===0?'Dnes':DN[dt.getDay()]} ${dt.getDate()}.${dt.getMonth()+1}.</td>
+        <td title="${WMO(d.weather_code[i])[1]}" style="font-size:18px">${WMO(d.weather_code[i])[0]}</td>
+        <td><b>${r0(d.temperature_2m_max[i])}°</b> / ${r0(d.temperature_2m_min[i])}°</td>
+        <td style="color:var(--snow);font-weight:600">${d.snowfall_sum[i]>=0.5?Math.round(d.snowfall_sum[i])+' cm':'–'}</td>
+        <td>${d.precipitation_sum[i]>=0.1?d.precipitation_sum[i].toFixed(1)+' mm':'–'}<br><small style="color:var(--muted)">${r0(d.precipitation_probability_max[i])} %</small></td>
+        <td>${r0(d.wind_speed_10m_max[i])}</td>
+        <td>${d.sunshine_duration[i]!=null?Math.round(d.sunshine_duration[i]/3600)+' h':'–'}</td></tr>`;}).join('') + `</table>`;
+  }
+  const tabs = r.cams.length>1 ? `<div class="camtabs">${r.cams.map((c,i)=>`<button data-i="${i}" class="${i===0?'on':''}">${c.label}</button>`).join('')}</div>` : '';
+  const yr = `https://www.yr.no/en/search?q=${encodeURIComponent(r.links.yr)}`;
+  document.getElementById('dBody').innerHTML = `
+    <div class="cam bigcam" id="bigcam">${camHTML(r)}</div>${tabs}
+    <div class="note" id="camcredit" style="margin-top:4px">Foto: ${r.cams[0].credit}</div>
+    <div style="margin-top:10px;color:var(--muted)">${r.region} · ${r.alt} · ${r.piste} sjezdovek<br>🚗 z Českých Budějovic ≈ ${r.drive.km} km, ${r.drive.t}</div>
+    ${facts}${fc}
+    <div class="links">
+      <a href="${r.links.bergfex}" target="_blank" rel="noopener">📷 Všechny kamery (bergfex)</a>
+      <a href="${r.links.bergfex.replace('/webcams/','/schneebericht/')}" target="_blank" rel="noopener">❄ Sněhová zpráva</a>
+      <a href="${yr}" target="_blank" rel="noopener">🌦 yr.no</a>
+      <a href="https://www.windy.com/?${r.lat.toFixed(3)},${r.lon.toFixed(3)},11" target="_blank" rel="noopener">💨 Windy</a>
+      <a href="${r.links.web}" target="_blank" rel="noopener">🌐 Web střediska</a>
+      <a href="https://mapy.cz/zakladni?planovani-trasy&rc=${HOME.lon.toFixed(4)}_${HOME.lat.toFixed(4)}_${r.lon.toFixed(4)}_${r.lat.toFixed(4)}" target="_blank" rel="noopener">🗺 Trasa (mapy.cz)</a>
+    </div>
+    <p class="note">Předpověď je spočítaná pro nadmořskou výšku ${r.fcElev} m (střed sjezdovek). Sníh = nový sníh v cm podle modelu.</p>`;
+  document.querySelectorAll('#dBody .camtabs button').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('#dBody .camtabs button').forEach(x=>x.classList.toggle('on',x===b));
+    const i=+b.dataset.i, box=document.getElementById('bigcam');
+    box.querySelector('.ph')?.remove(); box.querySelector('img')?.remove();
+    box.insertAdjacentHTML('afterbegin', camHTML(r,i));
+    const img = box.querySelector('img'); img.dataset.fixed='1';
+    document.getElementById('camcredit').textContent='Foto: '+r.cams[i].credit;
+  });
+  drawer.classList.add('open'); drawer.scrollTop=0;
+}
+
+/* ===================== START ===================== */
+document.getElementById('refresh').onclick = ()=>{ bust=Date.now(); loadWeather(); };
+renderAll();
+loadWeather();
+setInterval(()=>{ bust=Date.now(); loadWeather(); }, 15*60*1000); // auto refresh every 15 min
+</script>
+</body>
+</html>
