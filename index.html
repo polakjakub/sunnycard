@@ -247,10 +247,16 @@ function cardHTML(r, nDays){
 
 /* ===================== MAP ===================== */
 const map = L.map('map',{zoomSnap:.25, zoomControl:true, attributionControl:true});
-L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{
-  maxZoom:18, subdomains:'abcd',
-  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a> · počasí <a href="https://open-meteo.com/">Open-Meteo</a>'
+const WXATTR = ' · počasí <a href="https://open-meteo.com/">Open-Meteo</a>';
+const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  maxZoom:19,
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'+WXATTR
 }).addTo(map);
+const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{
+  maxZoom:17, subdomains:'abc',
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="https://opentopomap.org">OpenTopoMap</a>'+WXATTR
+});
+L.control.layers({'Mapa':osm,'Turistická (reliéf)':topo},null,{position:'bottomleft'}).addTo(map);
 RESORTS.forEach(r=>{
   L.marker([r.lat,r.lon],{icon:L.divIcon({className:'',html:'<div class="dot"></div>',iconSize:[12,12],iconAnchor:[6,6]})})
    .addTo(map).on('click',()=>openDrawer(r)).bindTooltip(r.name,{direction:'top',offset:[0,-6]});
