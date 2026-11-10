@@ -149,7 +149,7 @@ const RESORTS = [
   {id:'koessen', name:'Hochkössen', region:'Kaiserwinkl · Tyrolsko', cc:'AT',
    lat:47.652, lon:12.418, fcElev:1200, alt:'600–1700 m', piste:'25 km',
    drive:{km:300, t:'3 h 30 min'},
-   cams:[{...FW('unterberghorn'),label:'Unterberghorn'},{...FW('koessen'),label:'Kössen'}],
+   cams:[], windyR:6,
    links:{web:'https://skisport.com/hochkoessen/en', bergfex:'https://www.bergfex.at/koessen/webcams/', yr:'Kössen'}},
   {id:'heiligenblut', name:'Grossglockner / Heiligenblut', short:'Heiligenblut', region:'Korutany', cc:'AT',
    lat:47.033, lon:12.865, fcElev:2000, alt:'1300–2900 m', piste:'55 km',
@@ -159,7 +159,7 @@ const RESORTS = [
   {id:'schnals', name:'Schnalstal', region:'Alpin Arena Schnals · Jižní Tyrolsko', cc:'IT',
    lat:46.770, lon:10.790, fcElev:2700, alt:'2011–3212 m', piste:'35 km',
    drive:{km:520, t:'6 h'},
-   cams:[{...FW('schnalstal'),label:'Schnalstal'},{...FW('kurzras'),label:'Kurzras'}],
+   cams:[], windyR:8,
    links:{web:'https://www.schnalstal.com/en/winter', bergfex:'https://www.bergfex.com/schnalstal/webcams/', yr:'Kurzras'}},
 ].sort((a,b)=>a.drive.km-b.drive.km);
 
@@ -211,16 +211,43 @@ async function loadWeather(){
 /* ===================== WEBCAM IMG w/ FALLBACK ===================== */
 const PH = `<svg viewBox="0 0 64 40"><path d="M2 38 L20 12 L30 24 L40 8 L62 38 Z" fill="#8a9bb0"/><path d="M36 14 L40 8 L44 14 L41 13 L39 15 Z" fill="#fff"/></svg>`;
 let bust = Date.now();
+
+/* Záložní zdroj: Windy Webcams API (zdarma, klíč z https://api.windy.com/keys).
+   Použije se, když žádná z pevných kamer střediska nejde načíst. Prázdný klíč = vypnuto. */
+const WINDY_KEY = '';
+const windyCache = {};
+function windyCams(r){
+  const c = windyCache[r.id];
+  if(c && Date.now()-c.t < 9*60*1000) return c.p;           // obrázky Windy mají token platný 10 min
+  const url = `https://api.windy.com/webcams/api/v3/webcams?nearby=${r.lat},${r.lon},${r.windyR||10}&include=images,urls&limit=10&sortKey=popularity&sortDirection=desc&lang=en`;
+  const p = fetch(url,{headers:{'x-windy-api-key':WINDY_KEY}})
+    .then(res=>{ if(!res.ok) throw new Error(res.status); return res.json(); })
+    .then(j=>(j.webcams||[]).map(w=>({src:w.images?.current?.preview, title:w.title, link:w.urls?.detail})).filter(w=>w.src));
+  windyCache[r.id] = {t:Date.now(), p};
+  p.catch(()=>{ delete windyCache[r.id]; });
+  return p;
+}
+
 function camHTML(r, startIdx=0){
+  if(!r.cams.length) return `<img alt="Webcam ${r.name}" data-r="${r.id}" data-i="0" data-none="1" src="data:," onerror="camFail(this)">`;
   return `<img alt="Webcam ${r.name}" data-r="${r.id}" data-i="${startIdx}" src="${withBust(r.cams[startIdx])}" onerror="camFail(this)" loading="lazy">`;
 }
 function withBust(c){ if(!c) return ''; return c.src + (c.src.includes('?')?'&':'?') + '_=' + Math.floor(bust/60000); }
-function camFail(img){
-  const r = RESORTS.find(x=>x.id===img.dataset.r); let i = +img.dataset.i + 1;
-  if(img.dataset.fixed!=='1' && i < r.cams.length){ img.dataset.i=i; img.src = withBust(r.cams[i]); return; }
-  const box = img.parentElement;
+function camPlaceholder(img){
+  const box = img.parentElement; if(!box) return;
   img.remove();
   if(!box.querySelector('.ph')) box.insertAdjacentHTML('afterbegin', `<div class="ph">${PH}<span>Kamera teď nejde načíst<br>– klikni pro odkazy</span></div>`);
+}
+function camFail(img){
+  const r = RESORTS.find(x=>x.id===img.dataset.r); let i = +img.dataset.i + 1;
+  if(img.dataset.none!=='1' && img.dataset.fixed!=='1' && i < r.cams.length){ img.dataset.i=i; img.src = withBust(r.cams[i]); return; }
+  if(WINDY_KEY && img.dataset.windy!=='1'){
+    img.dataset.windy='1';
+    windyCams(r).then(list=>{ if(list.length){ img.src=list[0].src; img.title='Windy: '+(list[0].title||''); } else camPlaceholder(img); })
+                .catch(()=>camPlaceholder(img));
+    return;
+  }
+  camPlaceholder(img);
 }
 window.camFail = camFail;
 
@@ -363,7 +390,7 @@ function openDrawer(r){
   const yr = `https://www.yr.no/en/search?q=${encodeURIComponent(r.links.yr)}`;
   document.getElementById('dBody').innerHTML = `
     <div class="cam bigcam" id="bigcam">${camHTML(r)}</div>${tabs}
-    <div class="note" id="camcredit" style="margin-top:4px">Foto: ${r.cams[0].credit}</div>
+    <div class="note" id="camcredit" style="margin-top:4px">Foto: ${r.cams[0]?.credit || (WINDY_KEY?'Windy.com Webcams':'–')}</div>
     <div style="margin-top:10px;color:var(--muted)">${r.region} · ${r.alt} · ${r.piste} sjezdovek<br>🚗 z Českých Budějovic ≈ ${r.drive.km} km, ${r.drive.t}</div>
     ${facts}${fc}
     <div class="links">
